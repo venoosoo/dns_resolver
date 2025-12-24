@@ -1,13 +1,12 @@
 
 
+use std::rc;
+
 use crate::dns_header;
 use clap::ValueEnum;
 
 #[derive(Debug)]
 pub struct IpAnswer {
-    // will need later for parsing multiple sites at onse
-    name_offset: u16,
-    class: u16,
     // for caching
     ttl: u32,
     pub rdata: RData,
@@ -20,9 +19,6 @@ pub enum RData {
     MX {
         preference: u16,
         exchange_offset: u16,
-    },
-    CNAME {
-        name_offset: u16,
     },
     Unknown {
         rtype: u16,
@@ -60,7 +56,6 @@ impl RecordType {
 
 
 impl DnsResponse {
-
 
     fn decode_name(buf: &[u8], mut ptr: usize) -> Result<String, &'static str> {
         let mut labels = Vec::new();
@@ -155,14 +150,6 @@ impl DnsResponse {
                     }
                 }
 
-                RData::CNAME { name_offset } => {
-                    if let Ok(name) = Self::decode_name(buf, *name_offset as usize) {
-                        println!("CNAME {}   TTL {}", name, ans.ttl);
-                    } else {
-                        println!("CNAME <invalid-name>");
-                    }
-                }
-
                 RData::Unknown { rtype, data } => {
                     println!(
                         "TYPE{} {:?}   TTL {}",
@@ -173,23 +160,46 @@ impl DnsResponse {
         }
     }
 
+    pub fn match_rcode(&self, rcode: u8, ancount: u16) {
+        match rcode {
+            0 => { // NOERROR
+                if ancount == 0 {
+                    println!("No records of requested type (NODATA)");
+                } else {
+                    println!("Got answer records");
+                }
+            }
+            3 => println!("NXDOMAIN: domain does not exist"),
+            2 => println!("SERVFAIL: server failed"),
+            5 => println!("REFUSED: query refused"),
+            1 => println!("FORMERR: format error"),
+            _ => println!("Other error"),
+        }
+    }
+
     pub fn parse_response(&mut self, buf: &[u8; 512], question_size: usize) -> Result<(), &str> {
         if self.header.id != u16::from_be_bytes([buf[0], buf[1]]) {
             println!("the id from response is not matching");
         }
+        let flags_low = &buf[3];
+        let rcode = flags_low & 0b00001111; // last 4 bits of flags_low
+
+
         let mut ptr = 12; // skip header first
         ptr += question_size; // skip question
 
         // parse answers
         let ancount = u16::from_be_bytes([buf[6], buf[7]]);
-        
+
+        self.match_rcode(rcode, ancount);
+
         for _ in 0..ancount {
-            let (name_offset, new_ptr) = DnsResponse::read_name(buf, ptr)?;
+            let (_name_offset, new_ptr) = DnsResponse::read_name(buf, ptr)?;
             ptr = new_ptr;
 
             let rtype = u16::from_be_bytes([buf[ptr], buf[ptr+1]]);
             ptr += 2;
-            let class = u16::from_be_bytes([buf[ptr], buf[ptr+1]]);
+            let _class = u16::from_be_bytes([buf[ptr], buf[ptr+1]]);
             ptr += 2;
             let ttl = u32::from_be_bytes([buf[ptr], buf[ptr+1], buf[ptr+2], buf[ptr+3]]);
             ptr += 4;
@@ -204,8 +214,6 @@ impl DnsResponse {
                     let rdata:RData = RData::A(final_data);
 
                     self.answers.push(IpAnswer {
-                        name_offset,
-                        class,
                         ttl,
                         rdata,
         
@@ -219,8 +227,6 @@ impl DnsResponse {
                     let rdata:RData = RData::AAAA(final_data);
 
                     self.answers.push(IpAnswer {
-                        name_offset,
-                        class,
                         ttl,
                         rdata,
 
@@ -238,8 +244,6 @@ impl DnsResponse {
                     };
 
                     self.answers.push(IpAnswer {
-                        name_offset,
-                        class,
                         ttl,
                         rdata
                     });
@@ -255,8 +259,6 @@ impl DnsResponse {
                     };
 
                     self.answers.push(IpAnswer {
-                        name_offset,
-                        class,
                         ttl,
                         rdata,
                     });
