@@ -41,7 +41,6 @@ pub struct DnsResponse {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum RecordType {
     A = 1,
-    CNAME = 5,
     MX = 15,
     TXT = 16,
     AAAA = 28,
@@ -51,7 +50,6 @@ impl RecordType {
     pub fn from_u16(v: u16) -> Option<Self> {
         match v {
             1 => Some(Self::A),
-            5 => Some(Self::CNAME),
             15 => Some(Self::MX),
             16 => Some(Self::TXT),
             28 => Some(Self::AAAA),
@@ -184,6 +182,7 @@ impl DnsResponse {
 
         // parse answers
         let ancount = u16::from_be_bytes([buf[6], buf[7]]);
+        
         for _ in 0..ancount {
             let (name_offset, new_ptr) = DnsResponse::read_name(buf, ptr)?;
             ptr = new_ptr;
@@ -244,23 +243,6 @@ impl DnsResponse {
                         ttl,
                         rdata
                     });
-                }
-
-                Some(RecordType::CNAME) => {
-                    let (cname_offset, new_ptr) = Self::read_name(buf, ptr)?;
-                    ptr = new_ptr;
-
-                    let rdata:RData = RData::CNAME {
-                        name_offset: cname_offset,
-                    };
-
-                    self.answers.push(IpAnswer {
-                        name_offset,
-                        class,
-                        ttl,
-                        rdata
-                    });
-
                 }
 
                 _ => {
